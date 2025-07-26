@@ -1,3 +1,6 @@
+# סוכן מסחר רציף עם Kraken API ודמו דרך ChatGPT
+# רץ באופן שוטף בענן (Render), בלי לסכן כסף, ומבוסס החלטות GPT
+
 import time
 import requests
 from datetime import datetime
@@ -34,7 +37,7 @@ def get_latest_ohlc(pair):
         last = result[-1]  # open, high, low, close, vwap...
         return float(last[1]), float(last[4]), float(last[3])  # open, close, low
     except Exception as e:
-        print(f"Error fetching OHLC: {e}")
+        print(f"Error fetching OHLC: {e}", flush=True)
         return None, None, None
 
 # פונקציית החלטה שמתחברת ל-ChatGPT API
@@ -56,13 +59,13 @@ def ask_gpt_decision_via_api(open_price, close_price, low_price):
         decision = response.json()['choices'][0]['message']['content'].strip().lower()
         return decision
     except Exception as e:
-        print("❌ GPT API error:", e)
+        print("❌ GPT API error:", e, flush=True)
         return "hold"
 
 # פקודת קנייה מדומה
 
 def place_order_mock(pair, side, volume, price):
-    print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
+    print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}", flush=True)
 
 # פונקציית הריצה המרכזית
 
@@ -73,10 +76,10 @@ def run_bot():
         if now.day != last_reset_day:
             trade_counter = 0
             last_reset_day = now.day
-            print("🔁 Reset daily trade counter")
+            print("🔁 Reset daily trade counter", flush=True)
 
         if trade_counter >= MAX_TRADES_PER_DAY:
-            print("⏸ הגעת למספר העסקאות היומי. ממתין לחצות...")
+            print("⏸ הגעת למספר העסקאות היומי. ממתין לחצות...", flush=True)
             time.sleep(300)
             continue
 
@@ -87,7 +90,7 @@ def run_bot():
 
         decision = ask_gpt_decision_via_api(open_p, close_p, low_p)
         if decision != "buy":
-            print("🚫 No trade signal")
+            print("🚫 No trade signal", flush=True)
             time.sleep(TRADE_INTERVAL_MINUTES * 60)
             continue
 
@@ -103,7 +106,7 @@ def run_bot():
         trade_counter += 1
 
         place_order_mock(PAIR, "buy", volume, open_p)
-        print(f"💰 New capital: ${capital:.2f} | Trade #{trade_counter}\n")
+        print(f"💰 New capital: ${capital:.2f} | Trade #{trade_counter}\n", flush=True)
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
 
 # Flask dummy app to keep Render web service alive
