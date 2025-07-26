@@ -4,14 +4,13 @@ from datetime import datetime
 import krakenex
 import os
 import threading
-import random
 from flask import Flask
 import functools
 
-# כל הדפסה תזרום מיידית
+# הדפסות מיידיות
 print = functools.partial(print, flush=True)
 
-# התחברות ל-Kraken (מפתחות או דמו)
+# התחברות ל-Kraken
 api = krakenex.API()
 api.key = os.getenv("KRAKEN_API_KEY", "")
 api.secret = os.getenv("KRAKEN_API_SECRET", "")
@@ -22,14 +21,15 @@ MAX_TRADES_PER_DAY = 30
 STOP_LOSS_THRESHOLD = -0.02
 FEE = 0.0052
 INITIAL_CAPITAL = 5000
-TRADE_INTERVAL_MINUTES = 1
+TRADE_INTERVAL_MINUTES = 1  # כל דקה בדיקה
+OHLC_INTERVAL_MINUTES = 5   # כל נר הוא 5 דקות
 
 capital = INITIAL_CAPITAL
 trade_counter = 0
 last_reset_day = datetime.utcnow().day
 
 def get_latest_ohlc(pair):
-    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval=1"
+    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={OHLC_INTERVAL_MINUTES}"
     try:
         resp = requests.get(url).json()
         result = list(resp['result'].values())[0]
@@ -39,25 +39,28 @@ def get_latest_ohlc(pair):
         print(f"Error fetching OHLC for {pair}: {e}")
         return None, None, None
 
+# לוגיקת החלטה רכה יותר לדמו
 def ask_gpt_decision_via_api(open_price, close_price, low_price):
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
 
     print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}")
 
-    # BUY אם שינוי חיובי קטן או צניחה בינונית
-    if change_pct > 0.002 or dip_pct < -0.01:
+    # BUY אם שינוי חיובי קל או צניחה בינונית
+    if change_pct > 0.0005 or dip_pct < -0.005:
         return "buy"
 
-    # SELL אם עלייה חזקה בלי ירידות חזקות
-    if change_pct > 0.015 and dip_pct > -0.01:
+    # SELL אם הייתה עלייה יפה בלי צניחה
+    if change_pct > 0.01 and dip_pct > -0.01:
         return "sell"
 
     return "hold"
 
+# הדמיית פעולה
 def place_order_mock(pair, side, volume, price):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
 
+# לולאת הריצה של הסוכן
 def run_bot():
     global capital, trade_counter, last_reset_day
     while True:
@@ -103,7 +106,7 @@ def run_bot():
 
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
 
-# Flask + פינג עצמי
+# Flask ו־ping עצמי
 app = Flask(__name__)
 
 @app.route('/')
