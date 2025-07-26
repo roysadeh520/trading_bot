@@ -1,11 +1,10 @@
-# סוכן מסחר רציף עם Kraken API ודמו דרך ChatGPT
-# רץ באופן שוטף בענן (Render), בלי לסכן כסף, ומבוסס החלטות GPT
-
 import time
 import requests
 from datetime import datetime
 import krakenex
 import os
+import threading
+from flask import Flask
 
 # התחברות ל-Kraken (להחליף בפרטים אמיתיים או להשאיר ריק לדמו)
 api = krakenex.API()
@@ -65,42 +64,55 @@ def ask_gpt_decision_via_api(open_price, close_price, low_price):
 def place_order_mock(pair, side, volume, price):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
 
-# ריצה אינסופית
+# פונקציית הריצה המרכזית
 
-while True:
-    now = datetime.utcnow()
-    if now.day != last_reset_day:
-        trade_counter = 0
-        last_reset_day = now.day
-        print("🔁 Reset daily trade counter")
+def run_bot():
+    global capital, trade_counter, last_reset_day
+    while True:
+        now = datetime.utcnow()
+        if now.day != last_reset_day:
+            trade_counter = 0
+            last_reset_day = now.day
+            print("🔁 Reset daily trade counter")
 
-    if trade_counter >= MAX_TRADES_PER_DAY:
-        print("⏸ הגעת למספר העסקאות היומי. ממתין לחצות...")
-        time.sleep(300)
-        continue
+        if trade_counter >= MAX_TRADES_PER_DAY:
+            print("⏸ הגעת למספר העסקאות היומי. ממתין לחצות...")
+            time.sleep(300)
+            continue
 
-    open_p, close_p, low_p = get_latest_ohlc(PAIR)
-    if None in (open_p, close_p, low_p):
-        time.sleep(60)
-        continue
+        open_p, close_p, low_p = get_latest_ohlc(PAIR)
+        if None in (open_p, close_p, low_p):
+            time.sleep(60)
+            continue
 
-    decision = ask_gpt_decision_via_api(open_p, close_p, low_p)
-    if decision != "buy":
-        print("🚫 No trade signal")
+        decision = ask_gpt_decision_via_api(open_p, close_p, low_p)
+        if decision != "buy":
+            print("🚫 No trade signal")
+            time.sleep(TRADE_INTERVAL_MINUTES * 60)
+            continue
+
+        investment = capital / MAX_TRADES_PER_DAY
+        volume = investment / open_p
+        pnl_pct = (close_p - open_p) / open_p - FEE
+
+        if (low_p - open_p) / open_p < STOP_LOSS_THRESHOLD:
+            pnl_pct = STOP_LOSS_THRESHOLD - FEE
+
+        profit = investment * pnl_pct
+        capital += profit
+        trade_counter += 1
+
+        place_order_mock(PAIR, "buy", volume, open_p)
+        print(f"💰 New capital: ${capital:.2f} | Trade #{trade_counter}\n")
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
-        continue
 
-    investment = capital / MAX_TRADES_PER_DAY
-    volume = investment / open_p
-    pnl_pct = (close_p - open_p) / open_p - FEE
+# Flask dummy app to keep Render web service alive
+app = Flask(__name__)
 
-    if (low_p - open_p) / open_p < STOP_LOSS_THRESHOLD:
-        pnl_pct = STOP_LOSS_THRESHOLD - FEE
+@app.route('/')
+def home():
+    return "Bot is running"
 
-    profit = investment * pnl_pct
-    capital += profit
-    trade_counter += 1
-
-    place_order_mock(PAIR, "buy", volume, open_p)
-    print(f"💰 New capital: ${capital:.2f} | Trade #{trade_counter}\n")
-    time.sleep(TRADE_INTERVAL_MINUTES * 60)
+if __name__ == '__main__':
+    threading.Thread(target=run_bot).start()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
