@@ -20,6 +20,10 @@ FEE = 0.0025  # עדכון: עמלת קנייה של 0.25%
 INITIAL_CAPITAL = 5000
 TRADE_INTERVAL_MINUTES = 1
 OHLC_INTERVAL_MINUTES = 5  # פחות זמן, יותר רגיש
+SMA_PERIOD = 5  # תקופת ממוצע נע
+BUY_DISCOUNT = 0.985  # קנייה כשהמחיר יורד 1.5% מהממוצע
+
+total_ohlc_history = {pair: [] for pair in PAIRS}
 
 capital = INITIAL_CAPITAL
 trade_counter = 0
@@ -31,20 +35,33 @@ def get_latest_ohlc(pair):
     try:
         resp = requests.get(url).json()
         result = list(resp['result'].values())[0]
-        last = result[-1]
-        return float(last[1]), float(last[4]), float(last[3])  # open, close, low
+        history = result[-SMA_PERIOD:]
+        total_ohlc_history[pair] = [(float(x[1]), float(x[4]), float(x[3])) for x in history]
+        last = total_ohlc_history[pair][-1]
+        return last[0], last[1], last[2]  # open, close, low
     except Exception as e:
         print(f"Error fetching OHLC for {pair}: {e}")
         return None, None, None
 
-def get_trade_signal(open_price, close_price, low_price):
+def calculate_sma(pair):
+    closes = [x[1] for x in total_ohlc_history.get(pair, []) if x]
+    if len(closes) < SMA_PERIOD:
+        return None
+    return sum(closes) / len(closes)
+
+def get_trade_signal(pair, open_price, close_price, low_price):
+    sma = calculate_sma(pair)
+    if sma is None:
+        return "hold"
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
-    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}")
+    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, ממוצע נע {sma:.2f}")
 
-    if change_pct > 0.0025:
+    # SELL: אם יש עלייה קטנה מהמחיר הקנייה
+    if close_price > sma * 1.005:
         return "sell"
-    if change_pct > 0.0002 or dip_pct < -0.001:
+    # BUY: אם יש ירידה מתחת לממוצע נע
+    if close_price < sma * BUY_DISCOUNT:
         return "buy"
 
     return "hold"
@@ -88,7 +105,7 @@ def run_bot():
             current_prices[pair] = close_p
 
             print(f"💱 מחירי {pair}: Open={open_p:.2f} | Close={close_p:.2f}")
-            signal = get_trade_signal(open_p, close_p, low_p)
+            signal = get_trade_signal(pair, open_p, close_p, low_p)
 
             # SELL
             if pair in holdings:
