@@ -13,30 +13,33 @@ api = krakenex.API()
 api.key = os.getenv("KRAKEN_API_KEY", "")
 api.secret = os.getenv("KRAKEN_API_SECRET", "")
 
-PAIRS = ["BTCUSD", "ETHUSD", "SOLUSD"]
-MAX_TRADES_PER_DAY = 30
+PAIRS = [
+    "BTCUSD", "ETHUSD", "SOLUSD", "ADAUSD", "XRPUSD", "DOTUSD", "LINKUSD", "MATICUSD", "AVAXUSD", "DOGEUSD",
+    "LTCUSD", "ATOMUSD", "UNIUSD", "AAVEUSD", "NEARUSD", "XLMUSD", "ETCUSD", "EOSUSD", "TRXUSD", "ALGOUSD",
+    "FILUSD", "ICPUSD", "FTMUSD"
+]
+MAX_TRADES_PER_DAY = 100
 STOP_LOSS_THRESHOLD = -0.02
 FEE = 0.0025  # עדכון: עמלת קנייה של 0.25%
 INITIAL_CAPITAL = 5000
 TRADE_INTERVAL_MINUTES = 1
 OHLC_INTERVAL_MINUTES = 5  # פחות זמן, יותר רגיש
-SMA_PERIOD = 5  # תקופת ממוצע נע
 BUY_DROP_THRESHOLD = -0.01  # ירידה של 1%
 SELL_GAIN_THRESHOLD = 0.0075  # רווח של 0.75%
-
-total_ohlc_history = {pair: [] for pair in PAIRS}
 
 capital = INITIAL_CAPITAL
 trade_counter = 0
 last_reset_day = datetime.utcnow().day
 holdings = {}
+total_ohlc_history = {pair: [] for pair in PAIRS}
+
 
 def get_latest_ohlc(pair):
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={OHLC_INTERVAL_MINUTES}"
     try:
         resp = requests.get(url).json()
         result = list(resp['result'].values())[0]
-        history = result[-SMA_PERIOD-1:]
+        history = result[-6:]  # 6 נרות = 30 דקות
         total_ohlc_history[pair] = [(float(x[1]), float(x[4]), float(x[3])) for x in history]
         last = total_ohlc_history[pair][-1]
         return last[0], last[1], last[2]  # open, close, low
@@ -44,39 +47,35 @@ def get_latest_ohlc(pair):
         print(f"Error fetching OHLC for {pair}: {e}")
         return None, None, None
 
-def calculate_sma(pair):
-    closes = [x[1] for x in total_ohlc_history.get(pair, []) if x]
-    if len(closes) < SMA_PERIOD:
-        return None
-    return sum(closes) / len(closes)
 
-def get_recent_change(pair, periods=3):
+def get_recent_change(pair, periods=6):
     history = total_ohlc_history.get(pair, [])
-    if len(history) < periods + 1:
+    if len(history) < periods:
         return 0
-    start = history[-(periods + 1)][1]
+    start = history[0][1]
     end = history[-1][1]
     return (end - start) / start
 
-def get_trade_signal(pair, open_price, close_price, low_price):
-    sma = calculate_sma(pair)
-    if sma is None:
-        return "hold"
 
+def get_trade_signal(pair, open_price, close_price, low_price):
+    trend_pct = get_recent_change(pair, 6)
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
-    trend_pct = get_recent_change(pair, 3)
-    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, ממוצע נע {sma:.2f}")
+    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, שינוי חצי שעה {trend_pct:.3%}")
 
     if trend_pct < BUY_DROP_THRESHOLD:
         return "buy"
-    if close_price > sma and trend_pct > SELL_GAIN_THRESHOLD:
-        return "sell"
-
+    if pair in holdings:
+        for lot in holdings[pair]:
+            buy_price = lot["buy_price"]
+            if (close_price - buy_price) / buy_price > SELL_GAIN_THRESHOLD:
+                return "sell"
     return "hold"
+
 
 def place_order_mock(pair, side, volume, price):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
+
 
 def calculate_total_value(current_prices):
     total = capital
@@ -86,6 +85,7 @@ def calculate_total_value(current_prices):
             for lot in lots:
                 total += lot["amount"] * close_p
     return total
+
 
 def run_bot():
     global capital, trade_counter, last_reset_day, holdings
@@ -112,7 +112,6 @@ def run_bot():
                 continue
 
             current_prices[pair] = close_p
-
             print(f"💱 מחירי {pair}: Open={open_p:.2f} | Close={close_p:.2f}")
             signal = get_trade_signal(pair, open_p, close_p, low_p)
 
@@ -137,7 +136,7 @@ def run_bot():
                     del holdings[pair]
 
             if signal == "buy":
-                investment = capital / MAX_TRADES_PER_DAY
+                investment = capital / (MAX_TRADES_PER_DAY - trade_counter)
                 if capital < 10 or investment > capital:
                     print(f"❌ אין מספיק הון לרכישה של {pair} (נשארו ${capital:.2f})")
                     continue
@@ -160,6 +159,7 @@ def run_bot():
         print(f"📈 שווי נוכחי כולל של התיק: ${total_value:.2f} ({percent_change:+.2f}%)")
 
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
+
 
 app = Flask(__name__)
 
