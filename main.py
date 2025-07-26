@@ -1,5 +1,5 @@
 # סוכן מסחר רציף עם Kraken API ודמו דרך ChatGPT
-# רץ באופן שוטף בענן (Render), בלי לסכן כסף, ומבוסס החלטות GPT
+# רץ באופן שוטף בענן (Render), עם פינג עצמי למניעת הירדמות
 
 import time
 import requests
@@ -9,7 +9,7 @@ import os
 import threading
 from flask import Flask
 
-# התחברות ל-Kraken (להחליף בפרטים אמיתיים או להשאיר ריק לדמו)
+# התחברות ל-Kraken
 api = krakenex.API()
 api.key = os.getenv("KRAKEN_API_KEY", "")
 api.secret = os.getenv("KRAKEN_API_SECRET", "")
@@ -22,25 +22,20 @@ FEE = 0.0052
 INITIAL_CAPITAL = 5000
 TRADE_INTERVAL_MINUTES = 5
 
-# סטטוס הסוכן
 capital = INITIAL_CAPITAL
 trade_counter = 0
 last_reset_day = datetime.utcnow().day
-
-# פונקציית מחירי OHLC ברגע זה
 
 def get_latest_ohlc(pair):
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval=1"
     try:
         resp = requests.get(url).json()
         result = list(resp['result'].values())[0]
-        last = result[-1]  # open, high, low, close, vwap...
+        last = result[-1]
         return float(last[1]), float(last[4]), float(last[3])  # open, close, low
     except Exception as e:
         print(f"Error fetching OHLC: {e}", flush=True)
         return None, None, None
-
-# פונקציית החלטה שמתחברת ל-ChatGPT API
 
 def ask_gpt_decision_via_api(open_price, close_price, low_price):
     print(f"✅ Loaded OpenAI Key: {os.getenv('OPENAI')[:6]}...", flush=True)
@@ -70,13 +65,8 @@ def ask_gpt_decision_via_api(open_price, close_price, low_price):
         print("❌ GPT API error:", e, flush=True)
         return "hold"
 
-
-# פקודת קנייה מדומה
-
 def place_order_mock(pair, side, volume, price):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}", flush=True)
-
-# פונקציית הריצה המרכזית
 
 def run_bot():
     global capital, trade_counter, last_reset_day
@@ -118,13 +108,28 @@ def run_bot():
         print(f"💰 New capital: ${capital:.2f} | Trade #{trade_counter}\n", flush=True)
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
 
-# Flask dummy app to keep Render web service alive
+# Flask app + self-ping
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot is running"
 
+# פונקציית פינג עצמי
+def self_ping():
+    url = os.getenv("SELF_URL")
+    if not url:
+        print("⚠️ SELF_URL not set – skipping self-ping")
+        return
+    while True:
+        try:
+            print("🔁 Self-ping to stay awake...")
+            requests.get(url)
+        except Exception as e:
+            print("Ping failed:", e)
+        time.sleep(14 * 60)  # כל 14 דקות
+
 if __name__ == '__main__':
     threading.Thread(target=run_bot).start()
+    threading.Thread(target=self_ping, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
