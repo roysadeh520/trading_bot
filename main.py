@@ -41,7 +41,7 @@ def get_latest_ohlc(pair):
         if "result" not in resp or not resp["result"]:
             raise Exception("Invalid pair or no data returned")
         result = list(resp['result'].values())[0]
-        history = result[-12:]  # 12 נרות = 60 דקות
+        history = result[-288:]  # 288 נרות = 24 שעות
         total_ohlc_history[pair] = [(float(x[1]), float(x[4]), float(x[3])) for x in history]
         last = total_ohlc_history[pair][-1]
         return last[0], last[1], last[2]  # open, close, low
@@ -50,7 +50,7 @@ def get_latest_ohlc(pair):
         return None, None, None
 
 
-def get_recent_change(pair, periods=12):
+def get_recent_change(pair, periods=288):
     history = total_ohlc_history.get(pair, [])
     if len(history) < periods:
         return 0
@@ -60,10 +60,10 @@ def get_recent_change(pair, periods=12):
 
 
 def get_trade_signal(pair, open_price, close_price, low_price):
-    trend_pct = get_recent_change(pair, 12)
+    trend_pct = get_recent_change(pair, 288)
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
-    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, שינוי שעה {trend_pct:.3%}")
+    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, שינוי יום {trend_pct:.3%}")
 
     if trend_pct < BUY_DROP_THRESHOLD:
         return "buy"
