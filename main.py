@@ -10,7 +10,7 @@ import functools
 # הדפסות מיידיות
 print = functools.partial(print, flush=True)
 
-# התחברות ל-Kraken
+# התחברות ל-Kraken (דמו אם אין מפתחות)
 api = krakenex.API()
 api.key = os.getenv("KRAKEN_API_KEY", "")
 api.secret = os.getenv("KRAKEN_API_SECRET", "")
@@ -21,8 +21,8 @@ MAX_TRADES_PER_DAY = 30
 STOP_LOSS_THRESHOLD = -0.02
 FEE = 0.0052
 INITIAL_CAPITAL = 5000
-TRADE_INTERVAL_MINUTES = 1  # כל דקה בדיקה
-OHLC_INTERVAL_MINUTES = 5   # כל נר הוא 5 דקות
+TRADE_INTERVAL_MINUTES = 1
+OHLC_INTERVAL_MINUTES = 15  # 🔥 שינוי עיקרי – ניתוח כל 15 דקות
 
 capital = INITIAL_CAPITAL
 trade_counter = 0
@@ -39,28 +39,26 @@ def get_latest_ohlc(pair):
         print(f"Error fetching OHLC for {pair}: {e}")
         return None, None, None
 
-# לוגיקת החלטה רכה יותר לדמו
+# לוגיקה רכה יותר – מאפשרת יותר BUY בדמו
 def ask_gpt_decision_via_api(open_price, close_price, low_price):
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
 
     print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}")
 
-    # BUY אם שינוי חיובי קל או צניחה בינונית
-    if change_pct > 0.0005 or dip_pct < -0.005:
+    # BUY אם שינוי חיובי זעיר או צניחה מינורית
+    if change_pct > 0.0001 or dip_pct < -0.002:
         return "buy"
 
-    # SELL אם הייתה עלייה יפה בלי צניחה
-    if change_pct > 0.01 and dip_pct > -0.01:
+    # SELL אם עלייה ברורה בלי צניחה
+    if change_pct > 0.008 and dip_pct > -0.01:
         return "sell"
 
     return "hold"
 
-# הדמיית פעולה
 def place_order_mock(pair, side, volume, price):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
 
-# לולאת הריצה של הסוכן
 def run_bot():
     global capital, trade_counter, last_reset_day
     while True:
@@ -106,7 +104,7 @@ def run_bot():
 
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
 
-# Flask ו־ping עצמי
+# Flask + self-ping
 app = Flask(__name__)
 
 @app.route('/')
