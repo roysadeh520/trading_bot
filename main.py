@@ -19,12 +19,11 @@ STOP_LOSS_THRESHOLD = -0.02
 FEE = 0.0025  # עדכון: עמלת קנייה של 0.25%
 INITIAL_CAPITAL = 5000
 TRADE_INTERVAL_MINUTES = 1
-OHLC_INTERVAL_MINUTES = 15
+OHLC_INTERVAL_MINUTES = 5  # פחות זמן, יותר רגיש
 
 capital = INITIAL_CAPITAL
 trade_counter = 0
 last_reset_day = datetime.utcnow().day
-# holdings = { "ETHUSD": [ {"amount": x, "buy_price": y}, ... ] }
 holdings = {}
 
 def get_latest_ohlc(pair):
@@ -43,10 +42,9 @@ def get_trade_signal(open_price, close_price, low_price):
     dip_pct = (low_price - open_price) / open_price
     print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}")
 
-    if change_pct > 0.004:
+    if change_pct > 0.0025:
         return "sell"
-
-    if change_pct > 0.0005 or dip_pct < -0.003:
+    if change_pct > 0.0002 or dip_pct < -0.001:
         return "buy"
 
     return "hold"
@@ -134,7 +132,8 @@ def run_bot():
                 print("🚫 No trade signal")
 
         total_value = calculate_total_value(current_prices)
-        print(f"📈 שווי נוכחי כולל של התיק: ${total_value:.2f}")
+        percent_change = (total_value - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
+        print(f"📈 שווי נוכחי כולל של התיק: ${total_value:.2f} ({percent_change:+.2f}%)")
 
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
 
