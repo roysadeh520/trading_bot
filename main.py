@@ -56,11 +56,19 @@ def ask_gpt_decision_via_api(open_price, close_price, low_price):
                     {"role": "user", "content": f"open={open_price}, close={close_price}, low={low_price}"}
                 ]
             })
-        decision = response.json()['choices'][0]['message']['content'].strip().lower()
+
+        data = response.json()
+        if "choices" not in data:
+            print("❌ Unexpected API response:", data, flush=True)
+            return "hold"
+
+        decision = data['choices'][0]['message']['content'].strip().lower()
         return decision
+
     except Exception as e:
         print("❌ GPT API error:", e, flush=True)
         return "hold"
+
 
 # פקודת קנייה מדומה
 
