@@ -43,6 +43,7 @@ def get_latest_ohlc(pair):
 # פונקציית החלטה שמתחברת ל-ChatGPT API
 
 def ask_gpt_decision_via_api(open_price, close_price, low_price):
+    print(f"✅ Loaded OpenAI Key: {os.getenv('OPENAI')[:6]}...", flush=True)
     try:
         response = requests.post("https://api.openai.com/v1/chat/completions",
             headers={
