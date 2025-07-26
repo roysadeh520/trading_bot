@@ -1,31 +1,35 @@
-# סוכן מסחר רציף עם Kraken API ודמו דרך ChatGPT
-# רץ באופן שוטף בענן (Render), עם פינג עצמי למניעת הירדמות
-
 import time
 import requests
 from datetime import datetime
 import krakenex
 import os
 import threading
+import random
 from flask import Flask
+import functools
 
-# התחברות ל-Kraken
+# הדפסות מיידיות בלוגים
+print = functools.partial(print, flush=True)
+
+# התחברות ל-Kraken (דמו אם אין API Key)
 api = krakenex.API()
 api.key = os.getenv("KRAKEN_API_KEY", "")
 api.secret = os.getenv("KRAKEN_API_SECRET", "")
 
 # הגדרות
-PAIR = "ETHUSD"
+PAIRS = ["BTCUSD", "ETHUSD", "SOLUSD"]
 MAX_TRADES_PER_DAY = 30
 STOP_LOSS_THRESHOLD = -0.02
 FEE = 0.0052
 INITIAL_CAPITAL = 5000
-TRADE_INTERVAL_MINUTES = 5
+TRADE_INTERVAL_MINUTES = 1  # כל דקה – לדמו
 
+# סטטוס סוכן
 capital = INITIAL_CAPITAL
 trade_counter = 0
 last_reset_day = datetime.utcnow().day
 
+# שליפת מחירים עדכניים
 def get_latest_ohlc(pair):
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval=1"
     try:
@@ -34,62 +38,52 @@ def get_latest_ohlc(pair):
         last = result[-1]
         return float(last[1]), float(last[4]), float(last[3])  # open, close, low
     except Exception as e:
-        print(f"Error fetching OHLC: {e}", flush=True)
+        print(f"Error fetching OHLC for {pair}: {e}")
         return None, None, None
 
+# לוגיקה פנימית להחלטת קנייה/מכירה
 def ask_gpt_decision_via_api(open_price, close_price, low_price):
-    print(f"✅ Loaded OpenAI Key: {os.getenv('OPENAI')[:6]}...", flush=True)
-    try:
-        response = requests.post("https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {os.getenv('OPENAI')}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "gpt-4o",
-                "messages": [
-                    {"role": "system", "content": "אתה סוכן מסחר יומי. אתה עונה רק 'buy', 'sell' או 'hold'."},
-                    {"role": "user", "content": f"open={open_price}, close={close_price}, low={low_price}"}
-                ]
-            })
+    change_pct = (close_price - open_price) / open_price
+    dip_pct = (low_price - open_price) / open_price
 
-        data = response.json()
-        if "choices" not in data:
-            print("❌ Unexpected API response:", data, flush=True)
-            return "hold"
+    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צנילה {dip_pct:.3%}")
 
-        decision = data['choices'][0]['message']['content'].strip().lower()
-        return decision
+    if 0 < change_pct < 0.01 and dip_pct < -0.015:
+        return "buy"
+    if change_pct > 0.02 and dip_pct > -0.005:
+        return "sell"
+    return "hold"
 
-    except Exception as e:
-        print("❌ GPT API error:", e, flush=True)
-        return "hold"
-
+# הדמיית פקודת קנייה
 def place_order_mock(pair, side, volume, price):
-    print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}", flush=True)
+    print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
 
+# לולאת הסוכן
 def run_bot():
     global capital, trade_counter, last_reset_day
     while True:
+        pair = random.choice(PAIRS)
+
         now = datetime.utcnow()
         if now.day != last_reset_day:
             trade_counter = 0
             last_reset_day = now.day
-            print("🔁 Reset daily trade counter", flush=True)
+            print("🔁 Reset daily trade counter")
 
         if trade_counter >= MAX_TRADES_PER_DAY:
-            print("⏸ הגעת למספר העסקאות היומי. ממתין לחצות...", flush=True)
-            time.sleep(300)
+            print("⏸ הגעת למספר העסקאות היומי. ממתין לחצות...")
+            time.sleep(60)
             continue
 
-        open_p, close_p, low_p = get_latest_ohlc(PAIR)
+        print(f"\n🔄 בודק את {pair}...")
+        open_p, close_p, low_p = get_latest_ohlc(pair)
         if None in (open_p, close_p, low_p):
-            time.sleep(60)
+            time.sleep(30)
             continue
 
         decision = ask_gpt_decision_via_api(open_p, close_p, low_p)
         if decision != "buy":
-            print("🚫 No trade signal", flush=True)
+            print("🚫 No trade signal")
             time.sleep(TRADE_INTERVAL_MINUTES * 60)
             continue
 
@@ -104,30 +98,29 @@ def run_bot():
         capital += profit
         trade_counter += 1
 
-        place_order_mock(PAIR, "buy", volume, open_p)
-        print(f"💰 New capital: ${capital:.2f} | Trade #{trade_counter}\n", flush=True)
+        place_order_mock(pair, "buy", volume, open_p)
+        print(f"💰 New capital: ${capital:.2f} | Trade #{trade_counter}\n")
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
 
-# Flask app + self-ping
+# Flask + self-ping ל-Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot is running"
 
-# פונקציית פינג עצמי
 def self_ping():
     url = os.getenv("SELF_URL")
     if not url:
-        print("⚠️ SELF_URL not set – skipping self-ping", flush=True)
+        print("⚠️ SELF_URL not set – skipping self-ping")
         return
     while True:
         try:
-            print("🔁 Self-ping to stay awake...", flush=True)
+            print("🔁 Self-ping to stay awake...")
             requests.get(url)
         except Exception as e:
             print("Ping failed:", e)
-        time.sleep(14 * 60)  # כל 14 דקות
+        time.sleep(14 * 60)
 
 if __name__ == '__main__':
     threading.Thread(target=run_bot).start()
