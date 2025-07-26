@@ -54,9 +54,10 @@ def get_recent_change(pair, periods=288):
     history = total_ohlc_history.get(pair, [])
     if len(history) < periods:
         return 0
-    start = history[0][1]
-    end = history[-1][1]
-    return (end - start) / start
+    start_open = history[0][0]
+    end_close = history[-1][1]
+    return (end_close - start_open) / start_open
+
 
 
 def get_trade_signal(pair, open_price, close_price, low_price):
