@@ -21,7 +21,8 @@ INITIAL_CAPITAL = 5000
 TRADE_INTERVAL_MINUTES = 1
 OHLC_INTERVAL_MINUTES = 5  # פחות זמן, יותר רגיש
 SMA_PERIOD = 5  # תקופת ממוצע נע
-BUY_DISCOUNT = 0.985  # קנייה כשהמחיר יורד 1.5% מהממוצע
+BUY_DROP_THRESHOLD = -0.01  # ירידה של 1%
+SELL_GAIN_THRESHOLD = 0.0075  # רווח של 0.75%
 
 total_ohlc_history = {pair: [] for pair in PAIRS}
 
@@ -35,7 +36,7 @@ def get_latest_ohlc(pair):
     try:
         resp = requests.get(url).json()
         result = list(resp['result'].values())[0]
-        history = result[-SMA_PERIOD:]
+        history = result[-SMA_PERIOD-1:]
         total_ohlc_history[pair] = [(float(x[1]), float(x[4]), float(x[3])) for x in history]
         last = total_ohlc_history[pair][-1]
         return last[0], last[1], last[2]  # open, close, low
@@ -49,20 +50,28 @@ def calculate_sma(pair):
         return None
     return sum(closes) / len(closes)
 
+def get_recent_change(pair, periods=3):
+    history = total_ohlc_history.get(pair, [])
+    if len(history) < periods + 1:
+        return 0
+    start = history[-(periods + 1)][1]
+    end = history[-1][1]
+    return (end - start) / start
+
 def get_trade_signal(pair, open_price, close_price, low_price):
     sma = calculate_sma(pair)
     if sma is None:
         return "hold"
+
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
+    trend_pct = get_recent_change(pair, 3)
     print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, ממוצע נע {sma:.2f}")
 
-    # SELL: אם יש עלייה קטנה מהמחיר הקנייה
-    if close_price > sma * 1.005:
-        return "sell"
-    # BUY: אם יש ירידה מתחת לממוצע נע
-    if close_price < sma * BUY_DISCOUNT:
+    if trend_pct < BUY_DROP_THRESHOLD:
         return "buy"
+    if close_price > sma and trend_pct > SELL_GAIN_THRESHOLD:
+        return "sell"
 
     return "hold"
 
@@ -107,7 +116,6 @@ def run_bot():
             print(f"💱 מחירי {pair}: Open={open_p:.2f} | Close={close_p:.2f}")
             signal = get_trade_signal(pair, open_p, close_p, low_p)
 
-            # SELL
             if pair in holdings:
                 to_remove = []
                 for i, lot in enumerate(holdings[pair]):
@@ -128,7 +136,6 @@ def run_bot():
                 if not holdings[pair]:
                     del holdings[pair]
 
-            # BUY
             if signal == "buy":
                 investment = capital / MAX_TRADES_PER_DAY
                 if capital < 10 or investment > capital:
