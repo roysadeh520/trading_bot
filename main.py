@@ -119,11 +119,11 @@ def home():
 def self_ping():
     url = os.getenv("SELF_URL")
     if not url:
-        print("⚠️ SELF_URL not set – skipping self-ping")
+        print("⚠️ SELF_URL not set – skipping self-ping", flush=True)
         return
     while True:
         try:
-            print("🔁 Self-ping to stay awake...")
+            print("🔁 Self-ping to stay awake...", flush=True)
             requests.get(url)
         except Exception as e:
             print("Ping failed:", e)
