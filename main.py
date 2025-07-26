@@ -50,7 +50,7 @@ def ask_gpt_decision_via_api(open_price, close_price, low_price):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "gpt-4",
+                "model": "gpt-4o",
                 "messages": [
                     {"role": "system", "content": "אתה סוכן מסחר יומי. אתה עונה רק 'buy', 'sell' או 'hold'."},
                     {"role": "user", "content": f"open={open_price}, close={close_price}, low={low_price}"}
