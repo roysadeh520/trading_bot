@@ -24,7 +24,8 @@ OHLC_INTERVAL_MINUTES = 15
 capital = INITIAL_CAPITAL
 trade_counter = 0
 last_reset_day = datetime.utcnow().day
-holdings = {}  # { "ETHUSD": {"amount": x, "buy_price": y} }
+# holdings = { "ETHUSD": [ {"amount": x, "buy_price": y}, ... ] }
+holdings = {}
 
 def get_latest_ohlc(pair):
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={OHLC_INTERVAL_MINUTES}"
@@ -40,17 +41,27 @@ def get_latest_ohlc(pair):
 def get_trade_signal(open_price, close_price, low_price):
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
-
     print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}")
+
+    if change_pct > 0.004:
+        return "sell"
 
     if change_pct > 0.0005 or dip_pct < -0.003:
         return "buy"
-    if change_pct > 0.009 and dip_pct > -0.005:
-        return "sell"
+
     return "hold"
 
 def place_order_mock(pair, side, volume, price):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
+
+def calculate_total_value(current_prices):
+    total = capital
+    for pair, lots in holdings.items():
+        if pair in current_prices:
+            close_p = current_prices[pair]
+            for lot in lots:
+                total += lot["amount"] * close_p
+    return total
 
 def run_bot():
     global capital, trade_counter, last_reset_day, holdings
@@ -67,6 +78,8 @@ def run_bot():
             continue
 
         print(f"📦 תיק נוכחי: {holdings}")
+        current_prices = {}
+
         for pair in PAIRS:
             print(f"\n🔄 בודק את {pair}...")
             open_p, close_p, low_p = get_latest_ohlc(pair)
@@ -74,45 +87,54 @@ def run_bot():
                 print(f"⚠️ לא התקבלו נתונים עבור {pair}")
                 continue
 
+            current_prices[pair] = close_p
+
             print(f"💱 מחירי {pair}: Open={open_p:.2f} | Close={close_p:.2f}")
             signal = get_trade_signal(open_p, close_p, low_p)
 
             # SELL
-            if signal == "sell" and pair in holdings:
-                bought_at = holdings[pair]["buy_price"]
-                amount = holdings[pair]["amount"]
-                pnl_pct = (close_p - bought_at) / bought_at - FEE
-                profit = amount * bought_at * pnl_pct
-                capital += amount * close_p
-                trade_counter += 1
-                place_order_mock(pair, "sell", amount, close_p)
-                print(f"💸 רווח ממומש: ${profit:.2f}")
-                print(f"💼 Capital: ${capital:.2f} | Trade #{trade_counter}")
-                del holdings[pair]
-                continue
+            if pair in holdings:
+                to_remove = []
+                for i, lot in enumerate(holdings[pair]):
+                    buy_price = lot["buy_price"]
+                    amount = lot["amount"]
+                    change = (close_p - buy_price) / buy_price
+                    if signal == "sell" or change < STOP_LOSS_THRESHOLD:
+                        pnl_pct = change - FEE
+                        profit = amount * buy_price * pnl_pct
+                        capital += amount * close_p
+                        trade_counter += 1
+                        place_order_mock(pair, "sell", amount, close_p)
+                        print(f"💸 רווח ממומש: ${profit:.2f}")
+                        print(f"💼 Capital after sell: ${capital:.2f} | Trade #{trade_counter}")
+                        to_remove.append(i)
+                for idx in sorted(to_remove, reverse=True):
+                    del holdings[pair][idx]
+                if not holdings[pair]:
+                    del holdings[pair]
 
             # BUY
             if signal == "buy":
                 investment = capital / MAX_TRADES_PER_DAY
+                if capital < 10 or investment > capital:
+                    print(f"❌ אין מספיק הון לרכישה של {pair} (נשארו ${capital:.2f})")
+                    continue
                 volume = investment / open_p
                 cost = volume * open_p
                 capital -= cost
 
-                if pair in holdings:
-                    prev_amt = holdings[pair]["amount"]
-                    prev_price = holdings[pair]["buy_price"]
-                    total_amt = prev_amt + volume
-                    avg_price = (prev_amt * prev_price + cost) / total_amt
-                    holdings[pair] = {"amount": total_amt, "buy_price": avg_price}
-                else:
-                    holdings[pair] = {"amount": volume, "buy_price": open_p}
+                if pair not in holdings:
+                    holdings[pair] = []
+                holdings[pair].append({"amount": volume, "buy_price": open_p})
 
                 trade_counter += 1
                 place_order_mock(pair, "buy", volume, open_p)
                 print(f"💼 Capital after buy: ${capital:.2f} | Trade #{trade_counter}")
             else:
                 print("🚫 No trade signal")
-                print(f"💼 Capital: ${capital:.2f}")
+
+        total_value = calculate_total_value(current_prices)
+        print(f"📈 שווי נוכחי כולל של התיק: ${total_value:.2f}")
 
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
 
