@@ -16,23 +16,23 @@ api.secret = os.getenv("KRAKEN_API_SECRET", "")
 PAIRS = [
     "BTCUSD", "ETHUSD", "SOLUSD", "ADAUSD", "XRPUSD", "DOTUSD", "LINKUSD", "AVAXUSD", "DOGEUSD",
     "LTCUSD", "ATOMUSD", "UNIUSD", "AAVEUSD", "NEARUSD", "XLMUSD", "ETCUSD", "TRXUSD", "ALGOUSD",
-    "FILUSD", "ICPUSD", "BCHUSD", "EGLNUSD", "MKRUSD"
+    "FILUSD", "ICPUSD", "BCHUSD", "MKRUSD"
 ]
 MAX_TRADES_PER_DAY = 100
 STOP_LOSS_THRESHOLD = -0.03
-FEE = 0.0025  # עדכון: עמלת קנייה של 0.25%
+FEE = 0.0025  # עמלת קנייה של 0.25%
 INITIAL_CAPITAL = 5000
 TRADE_INTERVAL_MINUTES = 1
-OHLC_INTERVAL_MINUTES = 5  # פחות זמן, יותר רגיש
+OHLC_INTERVAL_MINUTES = 5  # כל נר 5 דקות
 BUY_DROP_THRESHOLD = -0.01  # ירידה של 1%
 SELL_GAIN_THRESHOLD = 0.0075  # רווח של 0.75%
+CHANGE_LOOKBACK = 24  # שעתיים אחורה = 24 נרות בני 5 דקות
 
 capital = INITIAL_CAPITAL
 trade_counter = 0
 last_reset_day = datetime.utcnow().day
 holdings = {}
 total_ohlc_history = {pair: [] for pair in PAIRS}
-
 
 def get_latest_ohlc(pair):
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={OHLC_INTERVAL_MINUTES}"
@@ -49,22 +49,19 @@ def get_latest_ohlc(pair):
         print(f"Error fetching OHLC for {pair}: {e}")
         return None, None, None
 
-
-def get_recent_change(pair, periods=288):
+def get_recent_change(pair, periods=CHANGE_LOOKBACK):
     history = total_ohlc_history.get(pair, [])
     if len(history) < periods:
         return 0
-    start_open = history[0][0]
+    start_open = history[-periods][0]
     end_close = history[-1][1]
     return (end_close - start_open) / start_open
 
-
-
 def get_trade_signal(pair, open_price, close_price, low_price):
-    trend_pct = get_recent_change(pair, 288)
+    trend_pct = get_recent_change(pair, CHANGE_LOOKBACK)
     change_pct = (close_price - open_price) / open_price
     dip_pct = (low_price - open_price) / open_price
-    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, שינוי יום {trend_pct:.3%}")
+    print(f"📊 ניתוח: שינוי {change_pct:.3%}, צניחה {dip_pct:.3%}, שינוי שעתיים {trend_pct:.3%}")
 
     if trend_pct < BUY_DROP_THRESHOLD:
         return "buy"
@@ -75,10 +72,8 @@ def get_trade_signal(pair, open_price, close_price, low_price):
                 return "sell"
     return "hold"
 
-
 def place_order_mock(pair, side, volume, price):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {side.upper()} {pair} {volume:.4f} units at ${price:.2f}")
-
 
 def calculate_total_value(current_prices):
     total = capital
@@ -88,7 +83,6 @@ def calculate_total_value(current_prices):
             for lot in lots:
                 total += lot["amount"] * close_p
     return total
-
 
 def run_bot():
     global capital, trade_counter, last_reset_day, holdings
@@ -162,7 +156,6 @@ def run_bot():
         print(f"📈 שווי נוכחי כולל של התיק: ${total_value:.2f} ({percent_change:+.2f}%)")
 
         time.sleep(TRADE_INTERVAL_MINUTES * 60)
-
 
 app = Flask(__name__)
 
